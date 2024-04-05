@@ -1,0 +1,305 @@
+---
+title: "Conjoint Analysis"
+output: html_document
+date: "2024-01-24"
+---
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+# Load necessary libraries
+library(readxl)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(ggplot2)
+
+# Load the preferences data-sheet into a data-frame 
+conjoint_data <- read_excel("TV-UserProfilePreferences.xlsx")
+
+# Select only the columns of interest
+conjoint_data <- conjoint_data %>%
+  select(
+    'Screen 75 inch',
+    'Screen 85 inch',
+    'Resolution 4K = 1',
+    'Sony = 1',
+    'Price (low = 0; high =1)',
+    contains("Preference Rank") # Selects all columns that contain "Preference Rank"
+  ) %>%
+  rename(
+    Screen_75_Dummy = 'Screen 75 inch',
+    Screen_85_Dummy = 'Screen 85 inch',
+    Resolution_4k_Dummy = 'Resolution 4K = 1',
+    Brand_Sony_Dummy = 'Sony = 1',
+    Price_High_Dummy = 'Price (low = 0; high =1)'
+  ) %>%
+  # Clean the column names by replacing spaces with underscores
+  rename_with(~str_replace_all(., " ", "_"))
+
+# View the data-frame
+View(conjoint_data)
+
+## PART 1: Part-worth for each attribute level ##
+
+# Extract the names of all preference rank columns
+preference_ranks <- names(conjoint_data)[grep("Preference_Rank", names(conjoint_data))]
+
+# Perform Conjoint Analysis
+perform_conjoint_analysis <- function(preference_ranks){
+  
+  # Define a function to perform linear regression for each person's preferences
+  perform_regression <- function(preference_column) {
+    
+    # Construct the formula for the regression model
+    formula <- as.formula(paste(preference_column, "~ Screen_75_Dummy + Screen_85_Dummy + Resolution_4k_Dummy + Brand_Sony_Dummy + Price_High_Dummy"))
+    
+    # Fit the linear model
+    model <- lm(formula, data = conjoint_data)
+    
+    # Return a list containing the model and the preference column name
+    list(model_name = preference_column, model_summary = summary(model))
+  }
+  
+  # Apply the function to each preference rank column and store the models
+  models <- map(preference_ranks, perform_regression)
+  
+  # Print the model summaries for each preference column
+  for (model_info in models) {
+    cat("\nModel for:", model_info$model_name, "\n")
+    print(model_info$model_summary)
+  }
+  
+  ## PART 2: Attribute Importance of each attribute ##
+  
+  # Function to calculate the range and importance for each model
+  calculate_attribute_importance <- function(model_summary) {
+    # Extract the coefficients from the model's summary
+    coefficients <- model_summary$coefficients
+    
+    # The utility for the 65-inch screen is captured by the intercept.
+    intercept <- coefficients["(Intercept)", "Estimate"] # Utility for the 65-inch screen
+  
+    screen_75 <- coefficients["Screen_75_Dummy", "Estimate"] + intercept # For the 75-inch screen
+    screen_85 <- coefficients["Screen_85_Dummy", "Estimate"] + intercept # For the 85-inch screen
+  
+    # The range for the screen size attribute is the max utility minus the min utility across the three screen sizes.
+    range_screen_size <- max(intercept, screen_75, screen_85) - min(intercept, screen_75, screen_85)
+    
+    # Calculate the ranges for the other attributes
+    range_resolution <- abs(coefficients["Resolution_4k_Dummy", "Estimate"])
+    range_brand_name <- abs(coefficients["Brand_Sony_Dummy", "Estimate"])
+    range_price <- abs(coefficients["Price_High_Dummy", "Estimate"])
+  
+    # Calculate the sum of all ranges
+    sum_of_ranges <- range_screen_size + range_resolution + range_brand_name + range_price
+  
+    # Calculate the importance for each attribute
+    importance_screen_size <- range_screen_size / sum_of_ranges
+    importance_resolution <- range_resolution / sum_of_ranges
+    importance_brand_name <- range_brand_name / sum_of_ranges
+    importance_price <- range_price / sum_of_ranges
+    
+    # Return a list of Attribute Importance
+    list(
+      Screen_Size_Importance = importance_screen_size,
+      Resolution_Importance = importance_resolution,
+      Brand_Name_Importance = importance_brand_name,
+      Price_Importance = importance_price
+    )
+  }
+  
+  # Initialize a list to store importance of each attribute for all models
+  attribute_importances <- list()
+  
+  # Loop through each model summary and calculate attribute importances
+  for (i in seq_along(models)) {
+    model_info <- models[[i]]
+    importances <- calculate_attribute_importance(model_info$model_summary)
+    attribute_importances[[model_info$model_name]] <- importances
+  }
+  
+  # Print the attribute importances for each model
+  for (model_name in names(attribute_importances)) {
+    cat("\nAttribute Importances for", model_name, ":\n")
+    importances <- attribute_importances[[model_name]]
+    # Loop through each attribute importance and print it as a percentage
+    for (attribute in names(importances)) {
+      cat(attribute, ":", sprintf("%.2f%%", importances[[attribute]] * 100), "\n")
+    }
+  }
+  
+  ## PART 3: Willingness to pay for each non-price attribute level ##
+  
+  # Function to calculate willingness to pay for each model
+  calculate_wtp <- function(model_info, price_difference) {
+    # Get the coefficients
+    coefficients <- model_info$model_summary$coefficients
+    
+    # Calculate the price part worth
+    price_part_worth <- abs(coefficients["Price_High_Dummy", "Estimate"])
+    
+    # Calculate the value of 1 util
+    one_util_value <- price_difference / price_part_worth
+    
+    # Calculate the willingness to pay for each attribute
+    wtp_75_screen <- coefficients["Screen_75_Dummy", "Estimate"] * one_util_value
+    wtp_85_screen <- coefficients["Screen_85_Dummy", "Estimate"] * one_util_value
+    wtp_sony_brand <- coefficients["Brand_Sony_Dummy", "Estimate"] * one_util_value
+    wtp_4k_resolution <- coefficients["Resolution_4k_Dummy", "Estimate"] * one_util_value
+    
+    # Return a list of WTP values
+    list(
+      Model_Name = model_info$model_name,
+      WTP_75_Screen = wtp_75_screen,
+      WTP_85_Screen = wtp_85_screen,
+      WTP_Sony_Brand = wtp_sony_brand,
+      WTP_4K_Resolution = wtp_4k_resolution
+    )
+  }
+  
+  # Loop through each model and calculate the Willingness to pay
+  wtp_results <- lapply(models, function(model_info) {
+    calculate_wtp(model_info, 500) # Replace 500 with the actual price difference
+  })
+  
+  # Print results
+  for (result in wtp_results) {
+    cat("\nWillingness To Pay -",result$Model_Name, ":\n\n")
+    cat("75 Inch Screen: $",result$WTP_75_Screen, "\n")
+    cat("85 Inch Screen: $",result$WTP_85_Screen, "\n")
+    cat("Sony Brand: $",result$WTP_Sony_Brand, "\n")
+    cat("4K Resolution: $",result$WTP_4K_Resolution, "\n")
+  }
+  
+  ## PART 4, 5 & 6: Optimal price, its associated Market Share and Maximum Profit ##
+  
+  # Define the cost estimate for each non-price attribute
+  cost_estimates <- c("Intercept" = 1000, "Screen 75 inch" = 500, "Screen 85 inch" = 750, "Resolution 4k" = 250, "Sony Brand" = 250)
+  
+  # Define the market size
+  market_size <- 100
+  
+  # Define dictionaries for each brand design
+  
+  # Own Brand Design
+  my_design <- c("Intercept" = 1, "Screen 75 inch" = 0, "Screen 85 inch" = 1, "Resolution 4k" = 1, "Sony Brand" = 0, "Price" = 1500)
+  
+  # Sony Design
+  sony_design <- c("Intercept" = 1, "Screen 75 inch" = 1, "Screen 85 inch" = 0, "Resolution 4k" = 1, "Sony Brand" = 1, "Price" = 2500)
+  
+  # Sharp Design
+  sharp_design <- c("Intercept" = 1, "Screen 75 inch" = 0, "Screen 85 inch" = 1, "Resolution 4k" = 1, "Sony Brand" = 0, "Price" = 2000)
+  
+  # Find non-price attributes between cost_estimates and my_design
+  common_attributes <- intersect(names(cost_estimates), names(my_design))
+  
+  # Multiply the attributes by their corresponding costs and sum them up
+  net_cost_my_design <- sum(my_design[common_attributes] * cost_estimates[common_attributes])
+  
+  # Output the net cost for 'My Design'
+  net_cost_my_design
+  
+  # Output the net cost for own design
+  cat("\nNet cost for own design:", net_cost_my_design, "\n")
+  
+  # Function to calculate Optimal price, its associated Market Share and Maximum Profit for each model
+  calculate_metrics <- function(model_summary) {
+    
+    # Extract the coefficients from the model's summary
+    coefficients <- model_summary$coefficients
+    
+    intercept <- coefficients["(Intercept)", "Estimate"]     # For the 65-inch screen
+    utility_75 <- coefficients["Screen_75_Dummy", "Estimate"] # For the 75-inch screen
+    utility_85 <- coefficients["Screen_85_Dummy", "Estimate"] # For the 85-inch screen
+    
+    # Calculate the ranges for the other attributes
+    utility_4k <- coefficients["Resolution_4k_Dummy", "Estimate"]
+    utility_sony <- coefficients["Brand_Sony_Dummy", "Estimate"]
+    utility_price <- coefficients["Price_High_Dummy", "Estimate"]
+    
+    design_pref <- c("Intercept" = intercept, "Screen 75 inch" = utility_75, "Screen 85 inch" = utility_85, "Resolution 4k" = utility_4k, "Sony Brand" = utility_sony,    "Price" = utility_price)
+    
+    common_attributes <- intersect(names(design_pref), names(my_design))
+    
+    max_profit <- 0
+    
+    list_metrics <- list()
+    list_shares <- list()
+    list_profits <- list()
+    list_sales <- list()
+    
+    for (price in seq(1500, 2600, by = 100)) {
+      my_design <- c("Intercept" = 1, "Screen 75 inch" = 0, "Screen 85 inch" = 1, "Resolution 4k" = 1, "Sony Brand" = 0, "Price" = price)
+      
+      utility_mydesign <- sum(my_design[common_attributes[-length(common_attributes)]] * design_pref[common_attributes[-length(common_attributes)]])+utility_price*(price-2000) / (2500-2000)
+      utility_sony <- sum(sony_design[common_attributes[-length(common_attributes)]] * design_pref[common_attributes[-length(common_attributes)]])+utility_price*(2500-2000)/ (2500-2000)
+      utility_sharp <- sum(sharp_design[common_attributes[-length(common_attributes)]] * design_pref[common_attributes[-length(common_attributes)]])+utility_price*(2000-2000)/ (2500-2000)
+    
+      attractiveness_mydesign <- exp(utility_mydesign)
+      attractiveness_sony <- exp(utility_sony)
+      attractiveness_sharp <- exp(utility_sharp)
+      
+      total_attractiveness <- attractiveness_mydesign + attractiveness_sony + attractiveness_sharp
+    
+      market_share <- attractiveness_mydesign/total_attractiveness
+      list_shares <- c(list_shares, market_share)
+      
+      sales <- market_share*market_size
+      list_sales <- c(list_sales,sales)
+      
+      margin <- price - net_cost_my_design
+      
+      profit <- margin*sales
+      list_profits <- c(list_profits, profit)
+    
+      if (profit > max_profit) {
+        max_profit <- profit
+        optimal_price <- price
+        optimal_market_share <- market_share
+        # List of metrics
+        list_metrics <- list(
+          max_profit = profit,
+          optimal_price = price,
+          optimal_market_share = market_share
+          )
+        }
+    }
+    # Return the list of metrics
+    list(list_metrics, list_shares, list_profits, list_sales)
+  }
+  
+  # Initialize a list to store the price, profit and market share metrics for all models
+  product_metrics <- list()
+  
+  # Initialize lists to store the profit and market share metrics for all models
+  list_market_shares <- list()
+  list_profits <- list()
+  list_sales <- list()
+  
+  # Loop through each model summary and calculate Optimal price, its associated Market Share and Maximum Profit
+  for (i in seq_along(models)) {
+    model_info <- models[[i]]
+    metrics <- calculate_metrics(model_info$model_summary)
+    product_metrics[[model_info$model_name]] <- metrics[[1]]
+    list_market_shares[[model_info$model_name]] <- metrics[[2]]
+    list_profits[[model_info$model_name]] <- metrics[[3]]
+    list_sales[[model_info$model_name]] <- metrics[[4]]
+  }
+  
+  # Print the product product_metrics for each model
+  for (model_name in names(product_metrics)) {
+    cat("\nMetrics for", model_name, ":\n")
+    metrics <- product_metrics[[model_name]]
+    # Print the results
+    for (metric in names(metrics)) {
+      cat(metric, ":", metrics[[metric]], "\n")
+    }
+    seq <- seq(1500, 2600, by = 100) 
+    plot(seq, list_market_shares[[model_name]], main = model_name, xlab="Prices", ylab="Market Shares", pch=19)
+    plot(seq, list_sales[[model_name]], main = model_name, xlab="Prices", ylab="Sales", pch=19)
+    plot(seq, list_profits[[model_name]], main = model_name, xlab="Prices", ylab="Profit", pch=19)
+  }
+}
+
+# Call the function to perform conjoint analysis
+perform_conjoint_analysis(preference_ranks)
+```
