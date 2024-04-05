@@ -6,7 +6,7 @@ This suite contains two projects: Conjoint Analysis and Bootstrapped WTP Analysi
 
 ### Overview
 
-The Conjoint Analysis project applies statistical techniques to determine how consumers value different features of TV products. The project outputs include partworths, attribute importance, and market simulations to inform optimal product design and pricing strategy.
+The Conjoint Analysis project applies statistical techniques to determine how consumers value different features of TV products. It includes configurations for Sony and Sharp, alongside the "Own Design" scenario, offering insights into consumer preferences and competitive dynamics within the TV product landscape. Project outputs include partworths, attribute importance, and market simulations to inform optimal product design and pricing.
 
 ### Components
 
@@ -19,7 +19,7 @@ The Conjoint Analysis project applies statistical techniques to determine how co
 
 ### Overview
 
-The Bootstrapped WTP Analysis extends the conjoint analysis by applying bootstrap techniques to estimate confidence intervals for willingness to pay. This advanced analysis offers a deeper dive into the financial valuation of TV features.
+The Bootstrapped WTP Analysis extends the conjoint analysis by applying bootstrap techniques to estimate confidence intervals for willingness to pay. This advanced analysis offers a deeper dive into the financial valuation of TV features. It also includes configurations for Sony and Sharp, alongside the "Own Design" scenario, allowing for a thorough examination of consumer preferences and competitive dynamics across different product scenarios.
 
 ### Components
 
