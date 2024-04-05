@@ -72,10 +72,10 @@ This project is licensed under the "MIT License".
 
 ## Acknowledgements
 
-This project was made possible by the contributions and guidance of several individuals:
+Thanks to:
 
 - Professor Prasad Naik, co-founder of the MSBA program at UC Davis and professor for Advanced Statistics, whose teachings have been instrumental in the execution of this project.
-- Special thanks to my classmates for their collaboration and contributions:
+- My classmates for their collaboration and contributions:
 
   - Sujai Aditya Muralidaran
   - Kritikka FNU
