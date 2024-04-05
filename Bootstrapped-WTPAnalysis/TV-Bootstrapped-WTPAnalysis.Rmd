@@ -1,0 +1,219 @@
+---
+title: "Bootstrapped WTP Analysis"
+author: "Team R"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+
+# Load necessary libraries
+library(readxl)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(ggplot2)
+
+# Read in the preference data from an Excel file
+conjoint_data <- read_excel("TV-UserProfilePreferences.xlsx")
+
+# Prepare the data by selecting relevant columns and renaming them for clarity
+conjoint_data <- conjoint_data %>%
+  select(
+    'Screen 75 inch',
+    'Screen 85 inch',
+    'Resolution 4K = 1',
+    'Sony = 1',
+    'Price (low = 0; high =1)',
+    contains("Preference Rank")
+  ) %>%
+  
+  rename(
+    Screen_75_Dummy = 'Screen 75 inch',
+    Screen_85_Dummy = 'Screen 85 inch',
+    Resolution_4k_Dummy = 'Resolution 4K = 1',
+    Brand_Sony_Dummy = 'Sony = 1',
+    Price_High_Dummy = 'Price (low = 0; high =1)'
+  ) %>%
+  # Replace spaces with underscores in column names for easier reference
+  rename_with(~str_replace_all(., " ", "_"))
+
+# Extract the names of columns that contain preference rankings
+preference_ranks <- names(conjoint_data)[grep("Preference_Rank", names(conjoint_data))]
+
+# Define a function to perform bootstrapping for each team member's preferences
+perform_bootstrapping <- function(preference_ranks){
+  
+  # Define a function for residual bootstrapping
+  residual_bootstrapping <- function(preference_column) {
+    
+    # Create a formula for the linear regression model
+    formula <- as.formula(paste(preference_column, "~ Screen_75_Dummy + Screen_85_Dummy + Resolution_4k_Dummy + Brand_Sony_Dummy + Price_High_Dummy"))
+    X <- conjoint_data[, c("Screen_75_Dummy", "Screen_85_Dummy", "Resolution_4k_Dummy", "Brand_Sony_Dummy", "Price_High_Dummy")]
+    
+    # Fit the linear model to the data
+    model <- lm(formula, data = conjoint_data)
+    model_summary <- summary(model)
+    
+    # Predict values and calculate residuals
+    yhat <- predict(model)
+    residual <- model$resid
+    
+    # Set the number of re-sampling trials for bootstrapping
+    resampling_trials <- 1000
+    
+    # Initialize matrices to store WTP calculations
+    wtp_75_screen <- wtp_85_screen <- wtp_sony_brand <- wtp_4k_resolution <- matrix(0, resampling_trials, 1)
+    
+    # Perform residual bootstrapping
+    for(i in 1:resampling_trials) {
+      # Re-sample residuals and create new outcome variable
+      resid_sample <- sample(residual, replace = TRUE)
+      ystar <- yhat + resid_sample
+      
+      # Re-fit the model to the new outcome variable
+      model.star <- lm(ystar ~ ., data = cbind(ystar, X))
+      model.star_summary <- summary(model.star)
+      
+      # Extract coefficients and calculate WTP
+      coefficients <- model.star_summary$coefficients
+      price_part_worth <- abs(coefficients["Price_High_Dummy", "Estimate"])
+      one_util_value <- (2500-2000) / price_part_worth
+      
+      # Store WTP for each attribute
+      wtp_75_screen[i] <- coefficients["Screen_75_Dummy", "Estimate"] * one_util_value
+      wtp_85_screen[i] <- coefficients["Screen_85_Dummy", "Estimate"] * one_util_value
+      wtp_sony_brand[i] <- coefficients["Brand_Sony_Dummy", "Estimate"] * one_util_value
+      wtp_4k_resolution[i] <- coefficients["Resolution_4k_Dummy", "Estimate"] * one_util_value
+      
+    }
+    
+    # Calculate mean and CI for WTP of each attribute
+    wtp_75_screen_mean <- mean(wtp_75_screen)
+    wtp_75_screen_CI <- quantile(wtp_75_screen, probs = c(0.025, 0.975))
+    
+    wtp_85_screen_mean <- mean(wtp_85_screen)
+    wtp_85_screen_CI <- quantile(wtp_85_screen, probs = c(0.025, 0.975))
+    
+    wtp_sony_brand_mean <- mean(wtp_sony_brand)
+    wtp_sony_brand_CI <- quantile(wtp_sony_brand, probs = c(0.025, 0.975))
+    
+    wtp_4k_resolution_mean <- mean(wtp_4k_resolution)
+    wtp_4k_resolution_CI <- quantile(wtp_4k_resolution, probs = c(0.025, 0.975))
+    
+    # Return a list of calculated WTP means and CIs
+    list(
+      Model_Name = preference_column,
+         WTP_75_Screen_Mean = wtp_75_screen_mean,
+         WTP_75_Screen_CI = wtp_75_screen_CI,
+         WTP_85_Screen_Mean = wtp_85_screen_mean,
+         WTP_85_Screen_CI = wtp_85_screen_CI,
+         WTP_Sony_Brand_Mean = wtp_sony_brand_mean,
+         WTP_Sony_Brand_CI = wtp_sony_brand_CI,
+         WTP_4K_Resolution_Mean = wtp_4k_resolution_mean,
+         WTP_4K_Resolution_CI = wtp_4k_resolution_CI
+    )
+  }
+  
+  # Perform the data bootstrapping for all preference columns and print the results
+  data_bootstrapping <- function(preference_column) {
+    
+    # Create a formula for the linear regression model
+    formula <- as.formula(paste(preference_column, "~ Screen_75_Dummy + Screen_85_Dummy + Resolution_4k_Dummy + Brand_Sony_Dummy + Price_High_Dummy"))
+    X_data <- conjoint_data[, c("Screen_75_Dummy", "Screen_85_Dummy", "Resolution_4k_Dummy", "Brand_Sony_Dummy", "Price_High_Dummy")]
+    Y_data <- conjoint_data[,preference_column]  
+    
+    # Set the number of re-sampling trials for bootstrapping
+    resampling_trials <- 1000
+    
+    # Initialize matrices to store WTP calculations
+    wtp_75_screen_data <- wtp_85_screen_data <- wtp_sony_brand_data <- wtp_4k_resolution_data <- matrix(0, resampling_trials, 1)
+    data = cbind(Y_data, X_data)
+    nn <- nrow(data)
+    
+    # Perform data bootstrapping
+    for(i in 1:resampling_trials) {
+      
+      # Re-sample observations and create new outcome variable
+      data_sample <- data[sample(nn, nn, replace = TRUE),]
+      
+      # Fit the model to the new outcome variable
+      model.data <- lm(formula, data = data_sample)
+      model.data_summary <- summary(model.data)
+      
+      # Extract coefficients and calculate WTP
+      coefficients_data <- model.data_summary$coefficients
+      price_coeff <- abs(coefficients_data["Price_High_Dummy", "Estimate"])
+      one_util <- (2500-2000) / price_coeff
+      
+      # Store WTP for each attribute
+      wtp_75_screen_data[i] <- coefficients_data["Screen_75_Dummy", "Estimate"] * one_util
+      wtp_85_screen_data[i] <- coefficients_data["Screen_85_Dummy", "Estimate"] * one_util
+      wtp_sony_brand_data[i] <- coefficients_data["Brand_Sony_Dummy", "Estimate"] * one_util
+      wtp_4k_resolution_data[i] <- coefficients_data["Resolution_4k_Dummy", "Estimate"] * one_util
+      
+    }
+    
+    # Calculate mean and CI for WTP of each attribute
+    wtp_75_screen_data_mean <- mean(wtp_75_screen_data)
+    wtp_75_screen_CI_data <- quantile(wtp_75_screen_data, probs = c(0.025, 0.975))
+    
+    wtp_85_screen_data_mean <- mean(wtp_85_screen_data)
+    wtp_85_screen_CI_data <- quantile(wtp_85_screen_data, probs = c(0.025, 0.975))
+    
+    wtp_sony_brand_data_mean <- mean(wtp_sony_brand_data)
+    wtp_sony_brand_CI_data <- quantile(wtp_sony_brand_data, probs = c(0.025, 0.975))
+    
+    wtp_4k_resolution_data_mean <- mean(wtp_4k_resolution_data)
+    wtp_4k_resolution_CI_data <- quantile(wtp_4k_resolution_data, probs = c(0.025, 0.975))
+    
+    # Return a list of calculated WTP means and CIs
+    list(Model_Name = preference_column,
+         WTP_75_Screen_data_mean = wtp_75_screen_data_mean,
+         WTP_75_Screen_CI_data = wtp_75_screen_CI_data,
+         WTP_85_Screen_data_mean = wtp_85_screen_data_mean,
+         WTP_85_Screen_CI_data = wtp_85_screen_CI_data,
+         WTP_Sony_Brand_data_mean = wtp_sony_brand_data_mean,
+         WTP_Sony_Brand_CI_data = wtp_sony_brand_CI_data,
+         WTP_4K_Resolution_data_mean = wtp_4k_resolution_data_mean,
+         WTP_4K_Resolution_CI_data = wtp_4k_resolution_CI_data
+    )   
+  }
+
+  # Residual Bootstrapping Models
+  residual_bs_models <- map(preference_ranks, residual_bootstrapping)
+  
+  # Loop over the results and print them out for residual bootstrapping
+  for (model_info in residual_bs_models) {
+    cat("\nCI for Willingness To Pay (Residual Bootstrapping) -", model_info$Model_Name, ":\n\n")
+    cat("75 Inch Screen Mean:",model_info$WTP_75_Screen_Mean, "\n")
+    cat("75 Inch Screen CI:",model_info$WTP_75_Screen_CI, "\n")
+    cat("85 Inch Screen Mean:",model_info$WTP_85_Screen_Mean, "\n")
+    cat("85 Inch Screen CI:",model_info$WTP_85_Screen_CI, "\n")
+    cat("Sony Brand Mean:",model_info$WTP_Sony_Brand_Mean, "\n")
+    cat("Sony Brand CI:",model_info$WTP_Sony_Brand_CI, "\n")
+    cat("4K Resolution Mean:",model_info$WTP_4K_Resolution_Mean, "\n")
+    cat("4K Resolution CI:",model_info$WTP_4K_Resolution_CI, "\n")
+  }
+  
+  # Data Bootstrapping Models
+  data_bs_models <- map(preference_ranks, data_bootstrapping)
+  
+  # Loop over the results and print them out for data bootstrapping
+  for (model_info2 in data_bs_models) {
+    cat("\nCI for Willingness To Pay (Data Bootstrapping) -", model_info2$Model_Name, ":\n\n")
+    cat("75 Inch Screen Mean:",model_info2$WTP_75_Screen_data_mean, "\n")
+    cat("75 Inch Screen CI:",model_info2$WTP_75_Screen_CI_data, "\n")
+    cat("85 Inch Screen Mean:",model_info2$WTP_85_Screen_data_mean, "\n")
+    cat("85 Inch Screen CI:",model_info2$WTP_85_Screen_CI_data, "\n")
+    cat("Sony Brand Mean:",model_info2$WTP_Sony_Brand_data_mean, "\n")
+    cat("Sony Brand CI:",model_info2$WTP_Sony_Brand_CI_data, "\n")
+    cat("4K Resolution Mean:",model_info2$WTP_4K_Resolution_data_mean, "\n")
+    cat("4K Resolution CI:",model_info2$WTP_4K_Resolution_CI_data, "\n")
+  }
+}
+
+# Call the bootstrapping function with the prepared preference ranks
+perform_bootstrapping(preference_ranks)
+```
+
