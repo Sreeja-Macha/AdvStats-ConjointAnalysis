@@ -38,7 +38,7 @@ These projects are intended to provide a toolkit for analyzing and enhancing TV 
 
 Thanks to:
 
-- Professor Prasad Naik, Co-founder of the MSBA program at UC Davis and professor for Advanced Statistics, whose teachings have been instrumental in the execution of this project.
+- Professor Prasad Naik, co-founder of the MSBA program at UC Davis and professor for Advanced Statistics, whose teachings have been instrumental in the execution of this project.
 - My classmates for their collaboration and contributions:
 
   - Sujai Aditya Muralidaran
